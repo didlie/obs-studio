@@ -385,11 +385,12 @@ static int obs_init_video(struct obs_video_info *ovi)
 	gs_leave_context();
 
 	errorcode = pthread_create(&video->video_thread, NULL,
-			obs_video_thread, obs);
+			obs_graphics_thread, obs);
 	if (errorcode != 0)
 		return OBS_VIDEO_FAIL;
 
 	video->thread_initialized = true;
+	video->ovi = *ovi;
 	return OBS_VIDEO_SUCCESS;
 }
 
@@ -541,6 +542,7 @@ static bool obs_init_data(void)
 	assert(data != NULL);
 
 	pthread_mutex_init_value(&obs->data.displays_mutex);
+	pthread_mutex_init_value(&obs->data.draw_callbacks_mutex);
 
 	if (pthread_mutexattr_init(&attr) != 0)
 		return false;
@@ -557,6 +559,8 @@ static bool obs_init_data(void)
 	if (pthread_mutex_init(&data->encoders_mutex, &attr) != 0)
 		goto fail;
 	if (pthread_mutex_init(&data->services_mutex, &attr) != 0)
+		goto fail;
+	if (pthread_mutex_init(&obs->data.draw_callbacks_mutex, NULL) != 0)
 		goto fail;
 	if (!obs_view_init(&data->main_view))
 		goto fail;
@@ -613,6 +617,8 @@ static void obs_free_data(void)
 	pthread_mutex_destroy(&data->outputs_mutex);
 	pthread_mutex_destroy(&data->encoders_mutex);
 	pthread_mutex_destroy(&data->services_mutex);
+	pthread_mutex_destroy(&data->draw_callbacks_mutex);
+	da_free(data->draw_callbacks);
 }
 
 static const char *obs_signals[] = {
@@ -818,9 +824,6 @@ void obs_shutdown(void)
 	} while (false)
 
 	FREE_REGISTERED_TYPES(obs_source_info, obs->source_types);
-	FREE_REGISTERED_TYPES(obs_source_info, obs->input_types);
-	FREE_REGISTERED_TYPES(obs_source_info, obs->filter_types);
-	FREE_REGISTERED_TYPES(obs_source_info, obs->transition_types);
 	FREE_REGISTERED_TYPES(obs_output_info, obs->output_types);
 	FREE_REGISTERED_TYPES(obs_encoder_info, obs->encoder_types);
 	FREE_REGISTERED_TYPES(obs_service_info, obs->service_types);
@@ -828,6 +831,10 @@ void obs_shutdown(void)
 	FREE_REGISTERED_TYPES(obs_modeless_ui, obs->modeless_ui_callbacks);
 
 #undef FREE_REGISTERED_TYPES
+
+	da_free(obs->input_types);
+	da_free(obs->filter_types);
+	da_free(obs->transition_types);
 
 	stop_video();
 	stop_hotkeys();
@@ -875,6 +882,11 @@ bool obs_initialized(void)
 uint32_t obs_get_version(void)
 {
 	return LIBOBS_API_VER;
+}
+
+const char *obs_get_version_string(void)
+{
+	return OBS_VERSION;
 }
 
 void obs_set_locale(const char *locale)
@@ -1007,28 +1019,11 @@ bool obs_reset_audio(const struct obs_audio_info *oai)
 bool obs_get_video_info(struct obs_video_info *ovi)
 {
 	struct obs_core_video *video = &obs->video;
-	const struct video_output_info *info;
 
 	if (!obs || !video->graphics)
 		return false;
 
-	info = video_output_get_info(video->video);
-	if (!info)
-		return false;
-
-	memset(ovi, 0, sizeof(struct obs_video_info));
-	ovi->base_width    = video->base_width;
-	ovi->base_height   = video->base_height;
-	ovi->gpu_conversion= video->gpu_conversion;
-	ovi->scale_type    = video->scale_type;
-	ovi->colorspace    = info->colorspace;
-	ovi->range         = info->range;
-	ovi->output_width  = info->width;
-	ovi->output_height = info->height;
-	ovi->output_format = info->format;
-	ovi->fps_num       = info->fps_num;
-	ovi->fps_den       = info->fps_den;
-
+	*ovi = video->ovi;
 	return true;
 }
 
@@ -1524,6 +1519,12 @@ static obs_source_t *obs_load_source_type(obs_data_t *source_data)
 	obs_source_set_monitoring_type(source,
 			(enum obs_monitoring_type)monitoring_type);
 
+	obs_data_release(source->private_settings);
+	source->private_settings =
+		obs_data_get_obj(source_data, "private_settings");
+	if (!source->private_settings)
+		source->private_settings = obs_data_create();
+
 	if (filters) {
 		size_t count = obs_data_array_count(filters);
 
@@ -1651,6 +1652,9 @@ obs_data_t *obs_save_source(obs_source_t *source)
 	obs_data_set_int   (source_data, "deinterlace_mode", di_mode);
 	obs_data_set_int   (source_data, "deinterlace_field_order", di_order);
 	obs_data_set_int   (source_data, "monitoring_type", m_type);
+
+	obs_data_set_obj(source_data, "private_settings",
+			source->private_settings);
 
 	if (source->info.type == OBS_SOURCE_TYPE_TRANSITION)
 		obs_transition_save(source, source_data);
@@ -1866,6 +1870,11 @@ double obs_get_active_fps(void)
 	return obs ? obs->video.video_fps : 0.0;
 }
 
+uint64_t obs_get_average_frame_time_ns(void)
+{
+	return obs ? obs->video.video_avg_frame_time_ns : 0;
+}
+
 enum obs_obj_type obs_obj_get_type(void *obj)
 {
 	struct obs_context_data *context = obj;
@@ -1903,7 +1912,7 @@ bool obs_set_audio_monitoring_device(const char *name, const char *id)
 	if (!obs || !name || !id || !*name || !*id)
 		return false;
 
-#ifdef _WIN32
+#if defined(_WIN32) || HAVE_PULSEAUDIO
 	pthread_mutex_lock(&obs->audio.monitoring_mutex);
 
 	if (strcmp(id, obs->audio.monitoring_device_id) == 0) {
@@ -1940,4 +1949,42 @@ void obs_get_audio_monitoring_device(const char **name, const char **id)
 		*name = obs->audio.monitoring_device_name;
 	if (id)
 		*id = obs->audio.monitoring_device_id;
+}
+
+void obs_add_main_render_callback(
+		void (*draw)(void *param, uint32_t cx, uint32_t cy),
+		void *param)
+{
+	if (!obs)
+		return;
+
+	struct draw_callback data = {draw, param};
+
+	pthread_mutex_lock(&obs->data.draw_callbacks_mutex);
+	da_push_back(obs->data.draw_callbacks, &data);
+	pthread_mutex_unlock(&obs->data.draw_callbacks_mutex);
+}
+
+void obs_remove_main_render_callback(
+		void (*draw)(void *param, uint32_t cx, uint32_t cy),
+		void *param)
+{
+	if (!obs)
+		return;
+
+	struct draw_callback data = {draw, param};
+
+	pthread_mutex_lock(&obs->data.draw_callbacks_mutex);
+	da_erase_item(obs->data.draw_callbacks, &data);
+	pthread_mutex_unlock(&obs->data.draw_callbacks_mutex);
+}
+
+uint32_t obs_get_total_frames(void)
+{
+	return obs ? obs->video.total_frames : 0;
+}
+
+uint32_t obs_get_lagged_frames(void)
+{
+	return obs ? obs->video.lagged_frames : 0;
 }
