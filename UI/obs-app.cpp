@@ -76,6 +76,8 @@ string opt_starting_collection;
 string opt_starting_profile;
 string opt_starting_scene;
 
+bool opt_no_menu = false;
+
 // AMD PowerXpress High Performance Flags
 #ifdef _MSC_VER
 extern "C" __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -1900,6 +1902,9 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--allow-opengl", nullptr)) {
 			opt_allow_opengl = true;
 
+		} else if (arg_is(argv[i], "--no-menu", nullptr)) {
+			opt_no_menu = true;			
+
 		} else if (arg_is(argv[i], "--help", "-h")) {
 			std::cout <<
 			"--help, -h: Get list of available commands.\n\n" << 
@@ -1918,6 +1923,7 @@ int main(int argc, char *argv[])
 			"--always-on-top: Start in 'always on top' mode.\n\n" <<
 			"--unfiltered_log: Make log unfiltered.\n\n" <<
 			"--allow-opengl: Allow OpenGL on Windows.\n\n" <<
+			"--no-menu: Show no menu.\n\n" <<			
 			"--version, -V: Get current version.\n";
 
 			exit(0);

@@ -6066,8 +6066,21 @@ void OBSBasic::SystemTray(bool firstStarted)
 			setVisible(false);
 			opt_minimize_tray = false;
 		}
+		
+		if(opt_no_menu) {
+			trayIcon->hide();
+		}
+		else {
+			trayIcon->show();
+		}		
 	} else if (sysTrayEnabled) {
-		trayIcon->show();
+		if(opt_no_menu) {
+			trayIcon->hide();
+		}
+		else {
+			trayIcon->show();
+		}
+		
 	} else if (!sysTrayEnabled) {
 		trayIcon->hide();
 	} else if (!sysTrayWhenStarted && sysTrayEnabled) {

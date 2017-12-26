@@ -185,3 +185,6 @@ extern bool opt_studio_mode;
 extern bool opt_allow_opengl;
 extern bool opt_always_on_top;
 extern std::string opt_starting_scene;
+
+extern bool opt_no_menu;
+
