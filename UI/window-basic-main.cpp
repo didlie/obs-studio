@@ -1174,6 +1174,8 @@ bool OBSBasic::InitBasicConfigDefaults()
 	/* Custom filename in basic.ini */
 	if(!config_has_user_value(basicConfig, "Output", "FilenameFormatting")) {
 		config_set_uint(basicConfig, "Output", "FilenameFormatting", 0);
+		//setVisible(false);
+		
 	}
 	else {
 		config_set_default_string(basicConfig, "Output", "FilenameFormatting",
