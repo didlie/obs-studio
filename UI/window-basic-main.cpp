@@ -1091,6 +1091,7 @@ bool OBSBasic::InitBasicConfigDefaults()
 	/* ----------------------------------------------------- */
 
 	config_set_default_string(basicConfig, "Output", "Mode", "Simple");
+	//
 
 	config_set_default_string(basicConfig, "SimpleOutput", "FilePath",
 			GetDefaultVideoSavePath().c_str());
@@ -1169,9 +1170,17 @@ bool OBSBasic::InitBasicConfigDefaults()
 		config_set_uint(basicConfig, "Video", "BaseCY", cy);
 		config_save_safe(basicConfig, "tmp", nullptr);
 	}
-
-	config_set_default_string(basicConfig, "Output", "FilenameFormatting",
+	
+	/* Custom filename in basic.ini */
+	if(!config_has_user_value(basicConfig, "Output", "FilenameFormatting")) {
+		config_set_uint(basicConfig, "Output", "FilenameFormatting", 0);
+	}
+	else {
+		config_set_default_string(basicConfig, "Output", "FilenameFormatting",
 			"%CCYY-%MM-%DD %hh-%mm-%ss");
+	}
+
+	
 
 	config_set_default_bool  (basicConfig, "Output", "DelayEnable", false);
 	config_set_default_uint  (basicConfig, "Output", "DelaySec", 20);
