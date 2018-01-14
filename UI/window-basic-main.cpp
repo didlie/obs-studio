@@ -762,6 +762,10 @@ void OBSBasic::Load(const char *file)
 	ClearSceneData();
 	InitDefaultTransitions();
 
+	obs_data_t *modulesObj = obs_data_get_obj(data, "modules");
+	if (api)
+		api->on_preload(modulesObj);
+
 	obs_data_array_t *sceneOrder = obs_data_get_array(data, "scene_order");
 	obs_data_array_t *sources    = obs_data_get_array(data, "sources");
 	obs_data_array_t *transitions= obs_data_get_array(data, "transitions");
@@ -925,12 +929,10 @@ retryScene:
 
 	/* ---------------------- */
 
-	if (api) {
-		obs_data_t *modulesObj = obs_data_get_obj(data, "modules");
+	if (api)
 		api->on_load(modulesObj);
-		obs_data_release(modulesObj);
-	}
 
+	obs_data_release(modulesObj);
 	obs_data_release(data);
 
 	if (!opt_starting_scene.empty())
@@ -959,6 +961,9 @@ retryScene:
 	LogScenes();
 
 	disableSaving--;
+
+	if (api)
+		api->on_event(OBS_FRONTEND_EVENT_SCENE_CHANGED);
 }
 
 #define SERVICE_PATH "service.json"
@@ -1091,7 +1096,6 @@ bool OBSBasic::InitBasicConfigDefaults()
 	/* ----------------------------------------------------- */
 
 	config_set_default_string(basicConfig, "Output", "Mode", "Simple");
-	//
 
 	config_set_default_string(basicConfig, "SimpleOutput", "FilePath",
 			GetDefaultVideoSavePath().c_str());
@@ -1170,18 +1174,15 @@ bool OBSBasic::InitBasicConfigDefaults()
 		config_set_uint(basicConfig, "Video", "BaseCY", cy);
 		config_save_safe(basicConfig, "tmp", nullptr);
 	}
-	
+
 	/* Custom filename in basic.ini */
 	if(!config_has_user_value(basicConfig, "Output", "FilenameFormatting")) {
 		config_set_uint(basicConfig, "Output", "FilenameFormatting", 0);
-		//setVisible(false);
-		
 	}
 	else {
 		config_set_default_string(basicConfig, "Output", "FilenameFormatting",
 			"%CCYY-%MM-%DD %hh-%mm-%ss");
 	}
-
 	
 
 	config_set_default_bool  (basicConfig, "Output", "DelayEnable", false);
@@ -2979,7 +2980,7 @@ void OBSBasic::RenderMain(void *data, uint32_t cx, uint32_t cy)
 		if (source)
 			obs_source_video_render(source);
 	} else {
-		obs_render_main_view();
+		obs_render_main_texture();
 	}
 	gs_load_vertexbuffer(nullptr);
 
@@ -3191,8 +3192,8 @@ bool OBSBasic::ResetAudio()
 		ai.speakers = SPEAKERS_MONO;
 	else if (strcmp(channelSetupStr, "2.1") == 0)
 		ai.speakers = SPEAKERS_2POINT1;
-	else if (strcmp(channelSetupStr, "4.0 Quad") == 0)
-		ai.speakers = SPEAKERS_QUAD;
+	else if (strcmp(channelSetupStr, "4.0") == 0)
+		ai.speakers = SPEAKERS_4POINT0;
 	else if (strcmp(channelSetupStr, "4.1") == 0)
 		ai.speakers = SPEAKERS_4POINT1;
 	else if (strcmp(channelSetupStr, "5.1") == 0)
@@ -3348,6 +3349,9 @@ void OBSBasic::ClearSceneData()
 	};
 
 	obs_enum_sources(cb, nullptr);
+
+	if (api)
+		api->on_event(OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP);
 
 	disableSaving--;
 
@@ -4044,6 +4048,9 @@ QMenu *OBSBasic::CreateAddSourcePopupMenu()
 	while (obs_enum_input_types(idx++, &type)) {
 		const char *name = obs_source_get_display_name(type);
 		uint32_t caps = obs_get_source_output_flags(type);
+
+		if ((caps & OBS_SOURCE_CAP_DISABLED) != 0)
+			continue;
 
 		if ((caps & OBS_SOURCE_DEPRECATED) == 0) {
 			addSource(popup, type, name);
@@ -5015,6 +5022,12 @@ void OBSBasic::on_recordButton_clicked()
 void OBSBasic::on_settingsButton_clicked()
 {
 	on_action_Settings_triggered();
+}
+
+void OBSBasic::on_actionHelpPortal_triggered()
+{
+	QUrl url = QUrl("https://obsproject.com/help", QUrl::TolerantMode);
+	QDesktopServices::openUrl(url);
 }
 
 void OBSBasic::on_actionWebsite_triggered()
@@ -6078,20 +6091,21 @@ void OBSBasic::SystemTray(bool firstStarted)
 			opt_minimize_tray = false;
 		}
 		
+		/* Hide OBS */
 		if(opt_no_menu) {
 			trayIcon->hide();
 		}
 		else {
 			trayIcon->show();
-		}		
+		}
 	} else if (sysTrayEnabled) {
+		/* Hide OBS */
 		if(opt_no_menu) {
 			trayIcon->hide();
 		}
 		else {
 			trayIcon->show();
 		}
-		
 	} else if (!sysTrayEnabled) {
 		trayIcon->hide();
 	} else if (!sysTrayWhenStarted && sysTrayEnabled) {
@@ -6162,8 +6176,9 @@ void OBSBasic::on_actionCopyFilters_triggered()
 void OBSBasic::on_actionPasteFilters_triggered()
 {
 	OBSSource source = obs_get_source_by_name(copyFiltersString);
-	OBSSceneItem sceneItem = GetCurrentSceneItem();
+	obs_source_release(source);
 
+	OBSSceneItem sceneItem = GetCurrentSceneItem();
 	OBSSource dstSource = obs_sceneitem_get_source(sceneItem);
 
 	if (source == dstSource)

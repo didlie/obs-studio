@@ -414,6 +414,11 @@ bool OBSApp::InitGlobalConfigDefaults()
 	config_set_default_bool(globalConfig, "BasicWindow",
 			"ShowStatusBar", true);
 
+	if (!config_get_bool(globalConfig, "General", "Pre21Defaults")) {
+		config_set_default_string(globalConfig, "General",
+				"CurrentTheme", "Dark");
+	}
+
 #ifdef _WIN32
 	config_set_default_bool(globalConfig, "Audio", "DisableAudioDucking",
 			true);
@@ -634,6 +639,17 @@ bool OBSApp::InitGlobalConfig()
 		    lastVersion < MAKE_SEMANTIC_VERSION(19, 0, 0);
 
 		config_set_bool(globalConfig, "General", "Pre19Defaults",
+				useOldDefaults);
+		changed = true;
+	}
+
+	if (!config_has_user_value(globalConfig, "General", "Pre21Defaults")) {
+		uint32_t lastVersion = config_get_int(globalConfig, "General",
+				"LastVersion");
+		bool useOldDefaults = lastVersion &&
+		    lastVersion < MAKE_SEMANTIC_VERSION(21, 0, 0);
+
+		config_set_bool(globalConfig, "General", "Pre21Defaults",
 				useOldDefaults);
 		changed = true;
 	}
@@ -1901,7 +1917,8 @@ int main(int argc, char *argv[])
 
 		} else if (arg_is(argv[i], "--allow-opengl", nullptr)) {
 			opt_allow_opengl = true;
-
+			
+			
 		} else if (arg_is(argv[i], "--no-menu", nullptr)) {
 			opt_no_menu = true;			
 
@@ -1923,7 +1940,7 @@ int main(int argc, char *argv[])
 			"--always-on-top: Start in 'always on top' mode.\n\n" <<
 			"--unfiltered_log: Make log unfiltered.\n\n" <<
 			"--allow-opengl: Allow OpenGL on Windows.\n\n" <<
-			"--no-menu: Show no menu.\n\n" <<			
+			"--no-menu: Show no menu\n\n" <<
 			"--version, -V: Get current version.\n";
 
 			exit(0);

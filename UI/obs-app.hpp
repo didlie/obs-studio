@@ -187,4 +187,3 @@ extern bool opt_always_on_top;
 extern std::string opt_starting_scene;
 
 extern bool opt_no_menu;
-
