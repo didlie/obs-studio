@@ -4738,6 +4738,10 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 
 void OBSBasic::StartRecording()
 {
+	/* Re-read the basic.ini */
+	if (!InitBasicConfig())
+		throw "Failed to load basic.ini";
+	
 	if (outputHandler->RecordingActive())
 		return;
 	if (disableOutputsRef)
